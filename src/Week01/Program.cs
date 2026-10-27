@@ -12,16 +12,22 @@ using System.Text.Json;
 using OpenAI;
 using OpenAI.Chat;
 
-var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-    ?? throw new InvalidOperationException("Falta la variable de entorno GITHUB_TOKEN.");
-var model = Environment.GetEnvironmentVariable("MODEL") ?? "openai/gpt-4.1-mini";
+// Proveedor configurable por variables de entorno (cualquier API compatible con OpenAI):
+//   LLM_BASE_URL  -> p. ej. http://localhost:11434/v1 (Ollama) o el endpoint v1 de Microsoft Foundry.
+//                    Vacío = API oficial de OpenAI.
+//   LLM_API_KEY   -> la clave del proveedor (Ollama acepta cualquier texto).
+//   MODEL         -> nombre del modelo en ese proveedor.
+var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_URL");
+var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY")
+    ?? throw new InvalidOperationException("Falta la variable de entorno LLM_API_KEY.");
+var model = Environment.GetEnvironmentVariable("MODEL")
+    ?? throw new InvalidOperationException("Falta la variable de entorno MODEL.");
 var csvPath = args.Length > 0 ? args[0] : FindSampleCsv();
 var maxGastos = args.Length > 1 ? int.Parse(args[1]) : 5;
 
-var client = new ChatClient(
-    model,
-    new ApiKeyCredential(token),
-    new OpenAIClientOptions { Endpoint = new Uri("https://models.github.ai/inference") });
+var clientOptions = new OpenAIClientOptions();
+if (!string.IsNullOrWhiteSpace(baseUrl)) clientOptions.Endpoint = new Uri(baseUrl);
+var client = new ChatClient(model, new ApiKeyCredential(apiKey), clientOptions);
 
 var gastos = LeerGastos(csvPath).Take(maxGastos).ToList();
 Console.WriteLine($"Modelo: {model} | {gastos.Count} gastos de {csvPath}\n");
