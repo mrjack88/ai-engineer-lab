@@ -8,8 +8,16 @@ OLLAMA_MODEL="${1:-qwen2.5:3b}"
 
 # 1) Instalar si no está
 if ! command -v ollama >/dev/null 2>&1; then
+  if ! command -v zstd >/dev/null 2>&1; then
+    echo ">> Instalando zstd (lo necesita el instalador de Ollama)..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+  fi
   echo ">> Instalando Ollama..."
   curl -fsSL https://ollama.com/install.sh | sh
+  if ! command -v ollama >/dev/null 2>&1; then
+    echo "!! No se pudo instalar Ollama. Revisa el error de arriba."
+    return 1 2>/dev/null || exit 1
+  fi
 fi
 
 # 2) Arrancar el servidor si no responde (en el contenedor no hay systemd)
