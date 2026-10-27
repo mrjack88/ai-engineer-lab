@@ -10,7 +10,9 @@ OLLAMA_MODEL="${1:-qwen2.5:3b}"
 if ! command -v ollama >/dev/null 2>&1; then
   if ! command -v zstd >/dev/null 2>&1; then
     echo ">> Instalando zstd (lo necesita el instalador de Ollama)..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+    # La imagen trae un repo de Yarn con la firma caducada que rompe apt-get update.
+    sudo rm -f /etc/apt/sources.list.d/yarn.list
+    sudo apt-get update -qq; sudo apt-get install -y -qq zstd
   fi
   echo ">> Instalando Ollama..."
   curl -fsSL https://ollama.com/install.sh | sh
