@@ -1,0 +1,12 @@
+# .NET
+bin/
+obj/
+
+# Datos reales: NUNCA se suben al repo
+data/real/
+*.real.csv
+
+# Python / notebooks
+__pycache__/
+.ipynb_checkpoints/
+.venv/

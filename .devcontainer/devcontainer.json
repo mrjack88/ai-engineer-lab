@@ -1,0 +1,13 @@
+{
+  "name": "ai-engineer-lab",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:1-9.0",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-dotnettools.csdevkit", "ms-toolsai.jupyter", "ms-python.python"]
+    }
+  },
+  "postCreateCommand": "dotnet restore src/Week01 && pip install pandas matplotlib jupyter"
+}
