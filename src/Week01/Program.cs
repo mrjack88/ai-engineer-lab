@@ -7,6 +7,7 @@
 // Por defecto usa data/sample/gastos_ficticios.csv y 5 gastos.
 
 using System.ClientModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -23,7 +24,7 @@ var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY")
 var model = Environment.GetEnvironmentVariable("MODEL")
     ?? throw new InvalidOperationException("Falta la variable de entorno MODEL.");
 var csvPath = args.Length > 0 ? args[0] : FindSampleCsv();
-var maxGastos = args.Length > 1 ? int.Parse(args[1]) : 5;
+var maxGastos = args.Length > 1 ? int.Parse(args[1]) : 20;
 
 var client = CreateChatClient(baseUrl, model);
 
@@ -76,18 +77,36 @@ string[] categorias = ["Supermercado", "Restaurantes", "Transporte", "Vivienda",
                        "Salud", "Ocio", "Compras", "Educación", "Otros"];
 
 var listarCategorias = AIFunctionFactory.Create(
-    () => categorias,
+    () =>
+    {
+        Console.WriteLine("[herramienta] listar_categorias");
+        return categorias;
+    },
     name: "listar_categorias",
     description: "Devuelve la lista cerrada de categorías de gasto permitidas.");
 
-var options = new ChatOptions { Tools = [listarCategorias] };
+var importe_es_alto = AIFunctionFactory.Create(
+    ([Description("Importe del gasto en euros")] decimal importe) =>
+    {
+        Console.WriteLine($"[herramienta] importe_es_alto ({importe})");
+        return Math.Abs(importe) > 100;
+    },
+    name: "importe_es_alto",
+    description: "Recibe el importe de un gasto y responde si es “alto”, es decir, si supera 100 € en valor absoluto.");
+
+var options = new ChatOptions
+{
+    Tools = [importe_es_alto]
+};
 
 foreach (var gasto in gastos)
 {
     var messages = new List<ChatMessage>();
     messages.Add(new ChatMessage(ChatRole.System,
-        "Categorizas gastos bancarios. Usa siempre la herramienta listar_categorias " +
-        "y responde solo con el nombre exacto de una categoría."));
+        "Categorizas gastos bancarios. Estas son las categorias disponibles: Supermercado, Restaurantes, Transporte, Vivienda, Suministros, Salud, Ocio, Compras, Educación, Otros. " +
+        "Responde solo con el nombre exacto de una categoría. " + 
+        "Las compras en tiendas de hogar, muebles o bricolaje (IKEA, por ejemplo) van a Vivienda si el importe es alto, y a Compras si no lo es. " +
+        "Para saber si el importe es alto, utiliza la herramienta importe_es_alto"));
     messages.Add(new ChatMessage(ChatRole.User,
         $"Gasto: \"{gasto.Descripcion}\", importe {gasto.Importe:0.00} EUR"));
 
