@@ -9,15 +9,15 @@
 using System.ClientModel;
 using System.Globalization;
 using System.Text.Json;
-using OpenAI;
-using OpenAI.Chat;
+using Microsoft.Extensions.AI;
+using OllamaSharp;
 
 // Proveedor configurable por variables de entorno (cualquier API compatible con OpenAI):
 //   LLM_BASE_URL  -> p. ej. http://localhost:11434/v1 (Ollama) o el endpoint v1 de Microsoft Foundry.
 //                    Vacío = API oficial de OpenAI.
 //   LLM_API_KEY   -> la clave del proveedor (Ollama acepta cualquier texto).
 //   MODEL         -> nombre del modelo en ese proveedor.
-var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_URL");
+var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_URL") ?? "http://localhost:11434";
 var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY")
     ?? throw new InvalidOperationException("Falta la variable de entorno LLM_API_KEY.");
 var model = Environment.GetEnvironmentVariable("MODEL")
@@ -25,73 +25,92 @@ var model = Environment.GetEnvironmentVariable("MODEL")
 var csvPath = args.Length > 0 ? args[0] : FindSampleCsv();
 var maxGastos = args.Length > 1 ? int.Parse(args[1]) : 5;
 
-var clientOptions = new OpenAIClientOptions();
-if (!string.IsNullOrWhiteSpace(baseUrl)) clientOptions.Endpoint = new Uri(baseUrl);
-var client = new ChatClient(model, new ApiKeyCredential(apiKey), clientOptions);
+var client = CreateChatClient(baseUrl, model);
 
 var gastos = LeerGastos(csvPath).Take(maxGastos).ToList();
 Console.WriteLine($"Modelo: {model} | {gastos.Count} gastos de {csvPath}\n");
 
 // ---------- 1) Streaming ----------
-Console.WriteLine("== 1) Streaming ==");
-var resumenPrompt = "Resume en 3 frases en qué se gasta el dinero esta persona:\n"
-    + string.Join("\n", gastos.Select(g => $"- {g.Descripcion}: {g.Importe:0.00} EUR"));
+// Console.WriteLine("== 1) Streaming ==");
+// var resumenPrompt = "Resume en 3 frases en qué se gasta el dinero esta persona:\n"
+//     + string.Join("\n", gastos.Select(g => $"- {g.Descripcion}: {g.Importe:0.00} EUR"));
 
-await foreach (var update in client.CompleteChatStreamingAsync([new UserChatMessage(resumenPrompt)]))
-{
-    foreach (var part in update.ContentUpdate)
-        Console.Write(part.Text);
-}
-Console.WriteLine("\n");
+// // Initialize conversation with a system message
+// List<ChatMessage> conversation = new()
+// {
+//     new(ChatRole.System, "Eres un asistente de finanzas personales. Responde siempre en español. Tu rol es responder preguntas relacionadas con gastos y finanzas. No puedes inventar nada."),
+//     new ChatMessage(ChatRole.User, resumenPrompt)
+// };
+
+// var updates = new List<ChatResponseUpdate>();
+// await foreach (var update in client.GetStreamingResponseAsync(conversation))
+// {
+//     Console.Write(update.Text);
+//     updates.Add(update);
+// }
+// conversation.AddMessages(updates); 
+// Console.WriteLine("\n");
+
+// // Intereactive streaming part
+// while(true)
+// {
+//     Console.Write("Tu: ");
+//     var question = Console.ReadLine();
+//     if (string.IsNullOrWhiteSpace(question)) continue;
+//     if (question.Trim().Equals("salir", StringComparison.OrdinalIgnoreCase)) break;
+
+//     conversation.Add(new ChatMessage(ChatRole.User, question));
+//     Console.Write("Modelo: ");
+//     await foreach (var update in client.GetStreamingResponseAsync(conversation))
+//     {
+//         Console.Write(update.Text);
+//         updates.Add(update);
+//     }
+//     conversation.AddMessages(updates); 
+//     Console.WriteLine("\n");
+// }
 
 // ---------- 2) Function calling ----------
 Console.WriteLine("== 2) Function calling ==");
 string[] categorias = ["Supermercado", "Restaurantes", "Transporte", "Vivienda", "Suministros",
                        "Salud", "Ocio", "Compras", "Educación", "Otros"];
 
-var listarCategorias = ChatTool.CreateFunctionTool(
-    functionName: "listar_categorias",
-    functionDescription: "Devuelve la lista cerrada de categorías de gasto permitidas.");
+var listarCategorias = AIFunctionFactory.Create(
+    () => categorias,
+    name: "listar_categorias",
+    description: "Devuelve la lista cerrada de categorías de gasto permitidas.");
 
-var options = new ChatCompletionOptions { Tools = { listarCategorias } };
+var options = new ChatOptions { Tools = [listarCategorias] };
 
 foreach (var gasto in gastos)
 {
-    List<ChatMessage> messages =
-    [
-        new SystemChatMessage(
-            "Categorizas gastos bancarios. Usa siempre la herramienta listar_categorias " +
-            "y responde solo con el nombre exacto de una categoría."),
-        new UserChatMessage($"Gasto: \"{gasto.Descripcion}\", importe {gasto.Importe:0.00} EUR")
-    ];
+    var messages = new List<ChatMessage>();
+    messages.Add(new ChatMessage(ChatRole.System,
+        "Categorizas gastos bancarios. Usa siempre la herramienta listar_categorias " +
+        "y responde solo con el nombre exacto de una categoría."));
+    messages.Add(new ChatMessage(ChatRole.User,
+        $"Gasto: \"{gasto.Descripcion}\", importe {gasto.Importe:0.00} EUR"));
 
-    // Bucle de herramientas: el modelo puede pedir funciones varias veces antes de responder.
-    for (var paso = 0; paso < 5; paso++)
-    {
-        ChatCompletion completion = await client.CompleteChatAsync(messages, options);
 
-        if (completion.FinishReason == ChatFinishReason.ToolCalls)
-        {
-            messages.Add(new AssistantChatMessage(completion));
-            foreach (var call in completion.ToolCalls)
-            {
-                var resultado = call.FunctionName == "listar_categorias"
-                    ? JsonSerializer.Serialize(categorias)
-                    : "{\"error\":\"función desconocida\"}";
-                Console.WriteLine($"  [herramienta] {call.FunctionName}");
-                messages.Add(new ToolChatMessage(call.Id, resultado));
-            }
-            continue;
-        }
-
-        var u = completion.Usage;
-        Console.WriteLine($"{gasto.Descripcion,-40} -> {completion.Content[0].Text.Trim()}" +
-                          $"   (tokens: {u.InputTokenCount} in / {u.OutputTokenCount} out)");
-        break;
-    }
+    ChatResponse response = await client.GetResponseAsync(messages, options);
+    Console.WriteLine($"{gasto.Descripcion,-40} -> {response.Text.Trim()}");
 }
 
 // ---------- utilidades ----------
+static IChatClient CreateChatClient(string baseUrl, string model)
+{
+    ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+    ArgumentException.ThrowIfNullOrWhiteSpace(model);
+
+    IChatClient ollamaClient = new OllamaApiClient(
+        new Uri(baseUrl), model);
+
+    return new ChatClientBuilder(ollamaClient)
+        //avoids the  model to be involved in an infite loop calling tools
+        .UseFunctionInvocation(configure: f => f.MaximumIterationsPerRequest = 5)
+        .Build();
+}
+
 static IEnumerable<Gasto> LeerGastos(string path)
 {
     // Formato típico de banco belga: separador ';', decimales con coma, fecha dd/MM/yyyy.

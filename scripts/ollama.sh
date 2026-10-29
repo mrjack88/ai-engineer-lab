@@ -37,7 +37,7 @@ echo ">> Descargando el modelo $OLLAMA_MODEL (si no está ya)..."
 ollama pull "$OLLAMA_MODEL"
 
 # 4) Variables para la app
-export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_BASE_URL=http://localhost:11434
 export LLM_API_KEY=ollama
 export MODEL="$OLLAMA_MODEL"
 echo ">> Listo. LLM_BASE_URL=$LLM_BASE_URL MODEL=$MODEL"
